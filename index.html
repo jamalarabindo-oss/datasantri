@@ -1,0 +1,1008 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Users, BookOpen, Calendar as CalendarIcon, FileText, 
+  Settings, LogOut, UserCheck, Menu, X, Save, Edit, 
+  Trash2, Download, Search, ChevronRight, User, Home, BookKey, GraduationCap, CheckCircle
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { 
+  getFirestore, collection, doc, setDoc, deleteDoc, 
+  onSnapshot 
+} from 'firebase/firestore';
+
+// --- FIREBASE INITIALIZATION ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'madrasah-qorrobiyah-app';
+
+// --- DEFAULT DATA ---
+const DEFAULT_SUBJECTS = [
+  "Fiqih", "Tauhid", "Nahwu", "Akhlak", "Tajwid", "Hadits", 
+  "Sorrof", "Fasholatan", "Hafalan", "Baca Kitab", "I'lal", "Tafsir"
+];
+
+const CLASSES = [
+  "1 MI", "2 MI", "3 MI", "4 MI", "5 MI", "6 MI",
+  "1 MTs", "2 MTs", "3 MTs", "1 Aliyah", "2 Aliyah", "3 Aliyah"
+];
+
+const MONTHS = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+];
+
+// --- MAIN APP COMPONENT ---
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [loginRole, setLoginRole] = useState(null); // 'teacher' or 'student'
+  const [studentName, setStudentName] = useState(""); // For student login
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setTimeout(() => setIsReady(true), 800);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  if (!isReady) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+        <div className="flex flex-col items-center animate-pulse">
+          <BookKey className="w-16 h-16 text-blue-600 mb-4 animate-bounce" />
+          <h2 className="text-2xl font-bold text-slate-800 tracking-wider">Memuat Sistem Madrasah...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen font-sans bg-slate-50 text-slate-800">
+      {!loginRole ? (
+        <LoginScreen onLogin={(role, name) => {
+          setLoginRole(role);
+          if (role === 'student') setStudentName(name);
+        }} />
+      ) : loginRole === 'teacher' ? (
+        <AdminDashboard user={user} onLogout={() => setLoginRole(null)} />
+      ) : (
+        <StudentDashboard user={user} studentName={studentName} onLogout={() => setLoginRole(null)} />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// LOGIN SCREEN
+// ============================================================================
+function LoginScreen({ onLogin }) {
+  const [isTeacher, setIsTeacher] = useState(true);
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (isTeacher) {
+      if (password === '123456' && name.trim() !== '') {
+        onLogin('teacher', name);
+      } else {
+        setError('Nama atau Password guru salah! (Password: 123456)');
+      }
+    } else {
+      if (password === '1234' && name.trim() !== '') {
+        onLogin('student', name);
+      } else {
+        setError('Nama atau Password santri salah! (Password: 1234)');
+      }
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-white p-4 relative overflow-hidden">
+      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-100 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-pulse"></div>
+      
+      <div className="w-full max-w-md bg-white/90 backdrop-blur-xl p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-blue-50 relative z-10">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white mb-4 shadow-lg shadow-blue-500/30">
+            <GraduationCap size={32} />
+          </div>
+          <h1 className="text-2xl font-extrabold text-slate-800 mb-1">
+            APLIKASI ADMINISTRASI GURU
+          </h1>
+          <p className="text-xs font-bold text-blue-600 uppercase tracking-widest">Madrasah Al Qorrobiyah</p>
+        </div>
+
+        <div className="flex bg-slate-100 rounded-xl p-1 mb-6 shadow-inner">
+          <button
+            type="button"
+            className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${isTeacher ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+            onClick={() => { setIsTeacher(true); setError(''); setPassword(''); }}
+          >
+            Akses Guru
+          </button>
+          <button
+            type="button"
+            className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${!isTeacher ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+            onClick={() => { setIsTeacher(false); setError(''); setPassword(''); }}
+          >
+            Akses Santri
+          </button>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Nama Lengkap {isTeacher ? 'Guru' : 'Santri'}</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 bg-white"
+              placeholder={`Contoh: ${isTeacher ? 'Ust. Ahmad' : 'Muhammad Ali'}`}
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 bg-white"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          
+          {error && <p className="text-red-500 text-xs font-semibold text-center">{error}</p>}
+          
+          <button
+            type="submit"
+            className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all"
+          >
+            Masuk Aplikasi
+          </button>
+        </form>
+
+        <div className="mt-8 text-center border-t border-slate-100 pt-4">
+          <p className="text-xs font-semibold text-slate-400">
+            Pengembang: <span className="text-blue-600 font-bold">abdulloh ilyas</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ADMIN DASHBOARD
+// ============================================================================
+function AdminDashboard({ user, onLogout }) {
+  const [activeTab, setActiveTab] = useState('students');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  const [students, setStudents] = useState([]);
+  const [teacherBio, setTeacherBio] = useState({ name: '', dob: '', nip: '', phone: '', address: '', email: '', motto: '' });
+  const [subjects, setSubjects] = useState(DEFAULT_SUBJECTS);
+  const [attendance, setAttendance] = useState([]);
+  const [grades, setGrades] = useState([]);
+  const [teacherAttendance, setTeacherAttendance] = useState([]);
+  const [journals, setJournals] = useState([]);
+
+  useEffect(() => {
+    if (!user) return;
+    const getColRef = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
+
+    const unsubStudents = onSnapshot(getColRef('students'), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubBio = onSnapshot(getColRef('teacherBio'), (snap) => { if (!snap.empty) setTeacherBio(snap.docs[0].data()); });
+    const unsubSubjects = onSnapshot(getColRef('subjects'), (snap) => { if (!snap.empty) setSubjects(snap.docs[0].data().list || DEFAULT_SUBJECTS); });
+    const unsubAttendance = onSnapshot(getColRef('studentAttendance'), (snap) => setAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubGrades = onSnapshot(getColRef('grades'), (snap) => setGrades(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubTAttendance = onSnapshot(getColRef('teacherAttendance'), (snap) => setTeacherAttendance(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubJournals = onSnapshot(getColRef('journals'), (snap) => setJournals(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+    return () => {
+      unsubStudents(); unsubBio(); unsubSubjects(); unsubAttendance(); 
+      unsubGrades(); unsubTAttendance(); unsubJournals();
+    };
+  }, [user]);
+
+  const dbActions = {
+    saveStudent: async (data, id = null) => {
+      if (!user) return;
+      const ref = id ? doc(db, 'artifacts', appId, 'public', 'data', 'students', id) : doc(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+      await setDoc(ref, data);
+    },
+    deleteStudent: async (id) => {
+      if (!user) return;
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', id));
+    },
+    saveBio: async (data) => {
+      if (!user) return;
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'teacherBio', 'main'), data);
+    },
+    saveSubjects: async (list) => {
+      if (!user) return;
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subjects', 'main'), { list });
+    },
+    saveAttendance: async (data, id) => {
+      if (!user) return;
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'studentAttendance', id), data);
+    },
+    saveGrade: async (data, id) => {
+      if (!user) return;
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'grades', id), data);
+    },
+    saveTeacherAttendance: async (data, id) => {
+      if (!user) return;
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'teacherAttendance', id), data);
+    },
+    saveJournal: async (data, id) => {
+      if (!user) return;
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'journals', id), data);
+    }
+  };
+
+  const navItems = [
+    { id: 'dashboard', icon: Home, label: 'Dashboard Utama' },
+    { id: 'students', icon: Users, label: 'Data Santri & Export' },
+    { id: 'attendance', icon: UserCheck, label: 'Absensi Santri' },
+    { id: 'grades', icon: BookOpen, label: 'Nilai Raport' },
+    { id: 'teacher_att', icon: CalendarIcon, label: 'Absen Guru' },
+    { id: 'journal', icon: FileText, label: 'Jurnal Guru' },
+    { id: 'bio', icon: User, label: 'Biodata Guru' },
+  ];
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-slate-50">
+      <div className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-100 shadow-xl md:shadow-none transform transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        <div className="p-6 flex items-center justify-between border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center">
+              <GraduationCap size={24} />
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-800 leading-tight">Al Qorrobiyah</h2>
+              <p className="text-xs text-slate-500">Panel Guru</p>
+            </div>
+          </div>
+          <button className="md:hidden text-slate-400" onClick={() => setSidebarOpen(false)}><X size={20} /></button>
+        </div>
+        
+        <nav className="p-4 space-y-1 overflow-y-auto h-[calc(100vh-80px)]">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => { setActiveTab(item.id); setSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === item.id ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <item.icon size={20} className={activeTab === item.id ? 'text-blue-600' : 'text-slate-400'} />
+              {item.label}
+              {activeTab === item.id && <ChevronRight size={16} className="ml-auto" />}
+            </button>
+          ))}
+          
+          <div className="pt-8 mt-4 border-t border-slate-100">
+            <button onClick={onLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50">
+              <LogOut size={20} /> <span className="font-medium">Keluar Aplikasi</span>
+            </button>
+          </div>
+        </nav>
+      </div>
+
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        <header className="bg-white/80 backdrop-blur-md border-b border-slate-100 sticky top-0 z-40">
+          <div className="flex items-center justify-between px-6 py-4">
+            <div className="flex items-center gap-4">
+              <button className="md:hidden text-slate-500" onClick={() => setSidebarOpen(true)}><Menu size={24} /></button>
+              <h1 className="text-xl font-bold text-slate-800 capitalize">{navItems.find(i => i.id === activeTab)?.label}</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-bold text-slate-800">{teacherBio.name || 'Guru Pengajar'}</p>
+                <p className="text-xs text-slate-500">Tahun Ajaran 2025/2026</p>
+              </div>
+              <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold">
+                <User size={20} />
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-6 bg-slate-50">
+          {activeTab === 'dashboard' && <DashboardHome students={students} attendance={attendance} teacherBio={teacherBio} />}
+          {activeTab === 'students' && <DataSantri students={students} dbActions={dbActions} attendance={attendance} grades={grades} subjects={subjects} />}
+          {activeTab === 'attendance' && <AbsensiSantri students={students} attendance={attendance} dbActions={dbActions} />}
+          {activeTab === 'grades' && <NilaiSantri students={students} subjects={subjects} grades={grades} dbActions={dbActions} />}
+          {activeTab === 'teacher_att' && <AbsensiGuru records={teacherAttendance} dbActions={dbActions} />}
+          {activeTab === 'journal' && <JurnalGuru records={journals} dbActions={dbActions} />}
+          {activeTab === 'bio' && <BiodataGuru bio={teacherBio} dbActions={dbActions} subjects={subjects} />}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// DASHBOARD HOME
+// ============================================================================
+function DashboardHome({ students, attendance, teacherBio }) {
+  const today = new Date().toISOString().split('T')[0];
+  const todayAtt = attendance.filter(a => a.date === today);
+  const presentCount = todayAtt.filter(a => a.status === '.').length;
+  const attendancePercentage = students.length ? Math.round((presentCount / students.length) * 100) : 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-100 relative overflow-hidden">
+        <h2 className="text-3xl font-bold text-slate-800 mb-2">Ahlan wa Sahlan, {teacherBio.name || 'Bapak/Ibu Guru'}! 👋</h2>
+        <p className="text-slate-500">Kelola absensi, nilai raport, dan data madrasah dengan mudah dan real-time.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl p-6 text-white shadow-lg shadow-blue-500/20">
+          <h3 className="text-blue-100 font-medium mb-2">Total Seluruh Santri</h3>
+          <div className="text-4xl font-extrabold">{students.length}</div>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-3xl p-6 text-white shadow-lg shadow-emerald-500/20">
+          <h3 className="text-emerald-100 font-medium mb-2">Kehadiran Hari Ini</h3>
+          <div className="text-4xl font-extrabold">{attendancePercentage}%</div>
+        </div>
+        <div className="bg-gradient-to-br from-amber-500 to-orange-500 rounded-3xl p-6 text-white shadow-lg shadow-amber-500/20">
+          <h3 className="text-amber-100 font-medium mb-2">Tahun Ajaran</h3>
+          <div className="text-2xl font-extrabold mt-1">2025/2026</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// DATA SANTRI
+// ============================================================================
+function DataSantri({ students, dbActions, attendance, grades, subjects }) {
+  const [showForm, setShowForm] = useState(false);
+  const [filterClass, setFilterClass] = useState('Semua');
+  const [search, setSearch] = useState('');
+  const [formData, setFormData] = useState({ id: null, name: '', gender: 'Laki-laki', className: '1 MI', father: '', mother: '', photoUrl: '' });
+
+  const sortedStudents = useMemo(() => {
+    return students
+      .filter(s => filterClass === 'Semua' || s.className === filterClass)
+      .filter(s => s.name.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [students, filterClass, search]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (formData.name.trim() === '') return;
+    const dataToSave = { ...formData };
+    if (!dataToSave.id) dataToSave.id = Date.now().toString();
+    await dbActions.saveStudent(dataToSave, dataToSave.id);
+    setShowForm(false);
+    setFormData({ id: null, name: '', gender: 'Laki-laki', className: '1 MI', father: '', mother: '', photoUrl: '' });
+  };
+
+  const handleExportExcel = () => {
+    let csvContent = "\uFEFF";
+    const headers = ["No", "Nama Santri", "L/P", "Kelas", "Nama Ayah", "Nama Ibu", "Sakit", "Izin", "Alpa", ...subjects, "Rata-rata"];
+    csvContent += headers.join(",") + "\r\n";
+
+    sortedStudents.forEach((student, idx) => {
+      const studentAtt = attendance.filter(a => a.studentId === student.id);
+      let sCount = 0, iCount = 0, aCount = 0;
+      studentAtt.forEach(att => {
+        if (att.status === 'S') sCount++;
+        if (att.status === 'I') iCount++;
+        if (att.status === 'A') aCount++;
+      });
+
+      const sGrades = grades.filter(g => g.studentId === student.id);
+      const gradeMap = {};
+      sGrades.forEach(g => gradeMap[g.subject] = g.final || 0);
+      
+      let total = 0;
+      const subVals = subjects.map(sub => {
+        const val = gradeMap[sub] || 0;
+        total += val;
+        return val;
+      });
+      const avg = subjects.length ? Math.round(total / subjects.length) : 0;
+
+      const row = [idx + 1, `"${student.name}"`, student.gender, `"${student.className}"`, `"${student.father || '-'}"`, `"${student.mother || '-'}"`, sCount, iCount, aCount, ...subVals, avg];
+      csvContent += row.join(",") + "\r\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Data_Santri_${filterClass}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div className="flex flex-wrap gap-2">
+          <select value={filterClass} onChange={(e) => setFilterClass(e.target.value)} className="px-4 py-2 bg-white border border-slate-200 rounded-xl font-bold text-blue-700">
+            <option value="Semua">Semua Kelas</option>
+            {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
+            <input type="text" placeholder="Cari santri..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl"/>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={handleExportExcel} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md flex items-center gap-2">
+            <Download size={18}/> Export Excel / Sheet
+          </button>
+          <button onClick={() => setShowForm(!showForm)} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md flex items-center gap-2">
+            {showForm ? <X size={18}/> : <Users size={18}/>} {showForm ? 'Batal' : 'Tambah Santri'}
+          </button>
+        </div>
+      </div>
+
+      {showForm && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100">
+          <h3 className="text-lg font-bold text-slate-800 mb-4">{formData.id ? 'Edit Data Santri' : 'Tambah Santri Baru'}</h3>
+          <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Nama Lengkap *</label>
+              <input type="text" required className="w-full p-2.5 border border-slate-200 rounded-lg" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Jenis Kelamin *</label>
+              <select className="w-full p-2.5 border border-slate-200 rounded-lg" value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})}>
+                <option value="Laki-laki">Laki-laki</option>
+                <option value="Perempuan">Perempuan</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Kelas *</label>
+              <select className="w-full p-2.5 border border-slate-200 rounded-lg" value={formData.className} onChange={e => setFormData({...formData, className: e.target.value})}>
+                {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Nama Ayah</label>
+              <input type="text" className="w-full p-2.5 border border-slate-200 rounded-lg" value={formData.father} onChange={e => setFormData({...formData, father: e.target.value})} />
+            </div>
+            <div className="md:col-span-2 flex justify-end">
+              <button type="submit" className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl flex items-center gap-2"><Save size={18}/> Simpan Santri</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm whitespace-nowrap">
+            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3 font-semibold w-12 text-center">No</th>
+                <th className="px-4 py-3 font-semibold">Nama Santri</th>
+                <th className="px-4 py-3 font-semibold">L/P</th>
+                <th className="px-4 py-3 font-semibold">Kelas</th>
+                <th className="px-4 py-3 font-semibold text-center">Absensi (S/I/A)</th>
+                <th className="px-4 py-3 font-semibold text-center">Rata-rata Nilai</th>
+                <th className="px-4 py-3 font-semibold text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {sortedStudents.map((s, idx) => {
+                const studentAtt = attendance.filter(a => a.studentId === s.id);
+                let sCount=0, iCount=0, aCount=0;
+                studentAtt.forEach(att => {
+                  if(att.status === 'S') sCount++;
+                  if(att.status === 'I') iCount++;
+                  if(att.status === 'A') aCount++;
+                });
+
+                const sGrades = grades.filter(g => g.studentId === s.id);
+                let totalGrade = 0;
+                sGrades.forEach(g => totalGrade += (g.final || 0));
+                const avgGrade = subjects.length ? Math.round(totalGrade / subjects.length) : 0;
+
+                return (
+                  <tr key={s.id} className="hover:bg-blue-50/50">
+                    <td className="px-4 py-3 text-center">{idx + 1}</td>
+                    <td className="px-4 py-3 font-bold text-slate-800">{s.name}</td>
+                    <td className="px-4 py-3">{s.gender === 'Laki-laki' ? 'L' : 'P'}</td>
+                    <td className="px-4 py-3"><span className="px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">{s.className}</span></td>
+                    <td className="px-4 py-3 text-center">
+                       <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-bold mr-1">S: {sCount}</span>
+                       <span className="bg-amber-50 text-amber-600 px-2 py-1 rounded text-xs font-bold mr-1">I: {iCount}</span>
+                       <span className="bg-red-50 text-red-600 px-2 py-1 rounded text-xs font-bold">A: {aCount}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                       <span className={`px-2.5 py-1 rounded-lg font-bold text-xs ${avgGrade >= 75 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                         {avgGrade > 0 ? avgGrade : 'Belum ada'}
+                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={() => { setFormData(s); setShowForm(true); }} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg mr-1"><Edit size={16} /></button>
+                      <button onClick={() => { if(window.confirm('Hapus santri ini?')) dbActions.deleteStudent(s.id); }} className="p-2 text-red-600 hover:bg-red-100 rounded-lg"><Trash2 size={16} /></button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// MINI CALENDAR HELPER
+// ============================================================================
+const getDaysInMonth = (monthIndex, year) => new Date(year, monthIndex + 1, 0).getDate();
+
+function MiniCalendar({ selectedMonth, selectedYear, dateData, onDateClick, show = true, readOnly = false }) {
+  if (!show) return null;
+  const daysInMonth = getDaysInMonth(selectedMonth, selectedYear);
+  const firstDay = new Date(selectedYear, selectedMonth, 1).getDay();
+  const days = [];
+  for (let i = 0; i < firstDay; i++) days.push(null);
+  for (let i = 1; i <= daysInMonth; i++) days.push(i);
+
+  const formatStatusStr = (status) => {
+    if (status === '.') return 'bg-emerald-100 text-emerald-700 font-bold';
+    if (status === 'S') return 'bg-blue-100 text-blue-700 font-bold';
+    if (status === 'I') return 'bg-amber-100 text-amber-700 font-bold';
+    if (status === 'A') return 'bg-red-100 text-red-700 font-bold';
+    return 'hover:bg-slate-100 text-slate-600';
+  };
+
+  return (
+    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div className="grid grid-cols-7 gap-1 text-center mb-2">
+        {['Mg','Sn','Sl','Rb','Km','Jm','Sb'].map(d => <div key={d} className="text-xs font-bold text-slate-400">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center">
+        {days.map((day, idx) => {
+          if (!day) return <div key={`empty-${idx}`} className="p-2"></div>;
+          const dateStr = `${selectedYear}-${String(selectedMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+          const status = dateData[dateStr] || null;
+          return (
+            <button key={day} onClick={() => !readOnly && onDateClick(dateStr)} disabled={readOnly} className={`p-1.5 text-xs rounded-lg transition-colors ${formatStatusStr(status)}`}>
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ABSENSI SANTRI (BISA DIEDIT LANGSUNG)
+// ============================================================================
+function AbsensiSantri({ students, attendance, dbActions }) {
+  const [filterClass, setFilterClass] = useState(CLASSES[0]);
+  const currentDate = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth());
+  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
+
+  const classStudents = students.filter(s => s.className === filterClass).sort((a,b) => a.name.localeCompare(b.name));
+
+  const handleStatusChange = async (studentId, dateStr, currentStatus) => {
+    const cycle = { null: '.', '.': 'S', 'S': 'I', 'I': 'A', 'A': null };
+    const nextStatus = cycle[currentStatus || null];
+    const id = `${studentId}_${dateStr}`;
+    await dbActions.saveAttendance({ studentId, date: dateStr, status: nextStatus }, id);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+        <div className="flex gap-4">
+          <select value={filterClass} onChange={(e) => setFilterClass(e.target.value)} className="px-4 py-2 border border-slate-200 rounded-xl font-bold text-blue-700 bg-blue-50">
+            {CLASSES.map(c => <option key={c} value={c}>Kelas {c}</option>)}
+          </select>
+          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="px-4 py-2 border border-slate-200 rounded-xl font-medium">
+            {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+          </select>
+        </div>
+        <div className="text-xs font-bold text-slate-500 flex gap-3">
+          <span className="text-emerald-600">(. Hadir)</span>
+          <span className="text-blue-600">(S Sakit)</span>
+          <span className="text-amber-600">(I Izin)</span>
+          <span className="text-red-600">(A Alpa)</span>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-100 text-slate-600">
+                <th className="p-3 text-left w-64 sticky left-0 bg-slate-100 z-10">Nama Santri</th>
+                {Array.from({length: getDaysInMonth(selectedMonth, selectedYear)}).map((_, i) => (
+                  <th key={i} className="p-2 text-center min-w-[32px] text-xs">{i+1}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {classStudents.map(student => {
+                const studentAtt = attendance.filter(a => a.studentId === student.id && a.date.startsWith(`${selectedYear}-${String(selectedMonth+1).padStart(2,'0')}`));
+                const attMap = {};
+                studentAtt.forEach(a => { if(a.status) attMap[a.date] = a.status; });
+
+                return (
+                  <tr key={student.id} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="p-3 font-semibold text-slate-800 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                      {student.name}
+                    </td>
+                    {Array.from({length: getDaysInMonth(selectedMonth, selectedYear)}).map((_, i) => {
+                      const dateStr = `${selectedYear}-${String(selectedMonth+1).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`;
+                      const status = attMap[dateStr];
+                      return (
+                        <td key={i} className="p-1 text-center">
+                          <button 
+                            onClick={() => handleStatusChange(student.id, dateStr, status)}
+                            className={`w-7 h-7 rounded text-xs font-bold flex items-center justify-center transition-all ${
+                              status === '.' ? 'bg-emerald-100 text-emerald-700' : 
+                              status === 'S' ? 'bg-blue-100 text-blue-700' : 
+                              status === 'I' ? 'bg-amber-100 text-amber-700' : 
+                              status === 'A' ? 'bg-red-100 text-red-700' : 'hover:bg-slate-200 text-slate-300'
+                            }`}
+                          >
+                            {status || '-'}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// NILAI RAPORT (BISA DIEDIT LENGKAP)
+// ============================================================================
+function NilaiSantri({ students, subjects, grades, dbActions }) {
+  const [filterClass, setFilterClass] = useState(CLASSES[0]);
+  const [selectedStudentId, setSelectedStudentId] = useState(null);
+
+  const classStudents = students.filter(s => s.className === filterClass).sort((a,b) => a.name.localeCompare(b.name));
+  const activeStudent = classStudents.find(s => s.id === selectedStudentId) || classStudents[0];
+
+  useEffect(() => {
+    if (classStudents.length > 0 && (!activeStudent || activeStudent.className !== filterClass)) {
+      setSelectedStudentId(classStudents[0].id);
+    }
+  }, [filterClass, classStudents, activeStudent]);
+
+  const handleGradeChange = async (subject, field, value) => {
+    if (!activeStudent) return;
+    let numVal = parseInt(value) || 0;
+    if (numVal > 100) numVal = 100;
+    if (numVal < 0) numVal = 0;
+
+    const id = `${activeStudent.id}_${subject}`;
+    const existing = grades.find(g => g.id === id) || { uh1: 0, uh2: 0, uh3: 0, mid: 0, pas: 0 };
+    const updated = { ...existing, [field]: numVal };
+    
+    const avgUH = ((updated.uh1 || 0) + (updated.uh2 || 0) + (updated.uh3 || 0)) / 3;
+    updated.final = Math.round((avgUH * 0.4) + ((updated.mid || 0) * 0.3) + ((updated.pas || 0) * 0.3));
+
+    await dbActions.saveGrade({ studentId: activeStudent.id, subject, ...updated }, id);
+  };
+
+  const getStudentGrades = (studentId) => {
+    const studentGrades = grades.filter(g => g.studentId === studentId);
+    const map = {};
+    subjects.forEach(sub => map[sub] = { uh1:'', uh2:'', uh3:'', mid:'', pas:'', final: 0 });
+    studentGrades.forEach(g => map[g.subject] = { ...map[g.subject], ...g });
+    return map;
+  };
+
+  const activeGradesMap = activeStudent ? getStudentGrades(activeStudent.id) : {};
+
+  return (
+    <div className="space-y-6">
+      <div className="flex bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+        <select value={filterClass} onChange={(e) => setFilterClass(e.target.value)} className="px-4 py-2 border border-slate-200 rounded-xl font-bold text-blue-700 bg-blue-50">
+          {CLASSES.map(c => <option key={c} value={c}>Kelas {c}</option>)}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+        <div className="xl:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-2 space-y-1 max-h-[70vh] overflow-y-auto">
+          {classStudents.map(s => (
+            <button 
+              key={s.id} 
+              onClick={() => setSelectedStudentId(s.id)}
+              className={`w-full text-left px-4 py-3 rounded-xl text-sm font-semibold transition-all ${selectedStudentId === s.id ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`}
+            >
+              {s.name}
+            </button>
+          ))}
+          {classStudents.length === 0 && <p className="text-sm text-slate-400 p-4 text-center">Tidak ada santri di kelas ini.</p>}
+        </div>
+
+        <div className="xl:col-span-3 bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+          {activeStudent ? (
+             <>
+              <h3 className="font-bold text-slate-800 text-lg mb-4">Edit Raport Nilai: <span className="text-blue-600">{activeStudent.name}</span></h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead>
+                    <tr className="text-slate-500 border-b border-slate-200">
+                      <th className="pb-3 font-semibold">Mata Pelajaran</th>
+                      <th className="pb-3 font-semibold text-center w-16">UH 1</th>
+                      <th className="pb-3 font-semibold text-center w-16">UH 2</th>
+                      <th className="pb-3 font-semibold text-center w-16">UH 3</th>
+                      <th className="pb-3 font-semibold text-center w-16">MID</th>
+                      <th className="pb-3 font-semibold text-center w-16">PAS</th>
+                      <th className="pb-3 font-bold text-center w-20 text-blue-700">FINAL</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {subjects.map(sub => {
+                      const g = activeGradesMap[sub];
+                      return (
+                        <tr key={sub} className="hover:bg-slate-50">
+                          <td className="py-3 font-medium text-slate-700">{sub}</td>
+                          {['uh1', 'uh2', 'uh3', 'mid', 'pas'].map(field => (
+                            <td key={field} className="py-2 px-1">
+                              <input 
+                                type="number" min="0" max="100"
+                                value={g[field] === 0 ? '' : g[field]}
+                                onChange={(e) => handleGradeChange(sub, field, e.target.value)}
+                                className="w-full p-2 text-center border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white font-bold"
+                                placeholder="0"
+                              />
+                            </td>
+                          ))}
+                          <td className="py-2 px-1">
+                            <div className="w-full p-2 text-center bg-blue-50 text-blue-800 font-extrabold rounded-lg border border-blue-100">
+                              {g.final}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+             </>
+          ) : (
+            <div className="text-center py-20 text-slate-400">Pilih nama santri terlebih dahulu.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ABSENSI GURU
+// ============================================================================
+function AbsensiGuru({ records, dbActions }) {
+  const [selectedClass, setSelectedClass] = useState(CLASSES[0]);
+  const currentDate = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth());
+  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
+
+  const handleDateClick = async (dateStr) => {
+    const id = `${dateStr}_${selectedClass}`;
+    const existing = records.find(r => r.id === id);
+    const cycle = { null: '.', '.': 'S', 'S': 'I', 'I': 'A', 'A': null };
+    const nextStatus = cycle[existing?.status || null];
+    await dbActions.saveTeacherAttendance({ date: dateStr, className: selectedClass, status: nextStatus }, id);
+  };
+
+  const currentDataMap = {};
+  records.filter(r => r.className === selectedClass).forEach(r => { currentDataMap[r.date] = r.status; });
+
+  return (
+    <div className="max-w-xl mx-auto space-y-6">
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex gap-4">
+        <select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} className="w-full px-4 py-2 border border-slate-200 rounded-xl font-bold text-blue-700 bg-blue-50">
+          {CLASSES.map(c => <option key={c} value={c}>Kelas {c}</option>)}
+        </select>
+        <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="w-full px-4 py-2 border border-slate-200 rounded-xl font-medium">
+          {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+        </select>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <h3 className="font-bold text-slate-800 mb-4 text-center">Kalender Presensi Mengajar</h3>
+        <MiniCalendar selectedMonth={selectedMonth} selectedYear={selectedYear} dateData={currentDataMap} onDateClick={handleDateClick} />
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// JURNAL GURU
+// ============================================================================
+function JurnalGuru({ records, dbActions }) {
+  const [selectedClass, setSelectedClass] = useState(CLASSES[0]);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [activityText, setActivityText] = useState("");
+  const selectedId = `${selectedDate}_${selectedClass}`;
+
+  useEffect(() => {
+    const existing = records.find(r => r.id === selectedId);
+    setActivityText(existing?.activity || "");
+  }, [selectedDate, selectedClass, records]);
+
+  const handleSave = async () => {
+    await dbActions.saveJournal({ date: selectedDate, className: selectedClass, activity: activityText }, selectedId);
+    alert("Jurnal berhasil disimpan!");
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex gap-4">
+        <select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} className="w-full px-4 py-2 border border-slate-200 rounded-xl font-bold text-blue-700 bg-blue-50">
+          {CLASSES.map(c => <option key={c} value={c}>Kelas {c}</option>)}
+        </select>
+        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full px-4 py-2 border border-slate-200 rounded-xl"/>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+        <h3 className="font-bold text-slate-800 text-lg">Catatan Kegiatan Mengajar</h3>
+        <textarea
+          value={activityText}
+          onChange={(e) => setActivityText(e.target.value)}
+          className="w-full h-48 p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 resize-none"
+          placeholder="Tuliskan materi pelajaran dan catatan harian..."
+        ></textarea>
+        <div className="flex justify-end">
+          <button onClick={handleSave} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center gap-2"><Save size={18}/> Simpan Jurnal</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// BIODATA GURU
+// ============================================================================
+function BiodataGuru({ bio, dbActions, subjects }) {
+  const [formData, setFormData] = useState(bio);
+  const [subList, setSubList] = useState(subjects.join(", "));
+
+  useEffect(() => {
+    setFormData(bio);
+    setSubList(subjects.join(", "));
+  }, [bio, subjects]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    await dbActions.saveBio(formData);
+    const newSubjects = subList.split(',').map(s => s.trim()).filter(s => s !== '');
+    await dbActions.saveSubjects(newSubjects);
+    alert("Biodata dan mata pelajaran berhasil diperbarui!");
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto bg-white rounded-3xl shadow-sm border border-slate-100 p-8">
+      <h2 className="text-xl font-bold text-slate-800 mb-6">Biodata Guru & Kurikulum Mata Pelajaran</h2>
+      <form onSubmit={handleSave} className="space-y-4">
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">Nama Lengkap & Gelar</label>
+          <input type="text" className="w-full p-2.5 border border-slate-200 rounded-lg" value={formData.name || ''} onChange={e => setFormData({...formData, name: e.target.value})} />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">NIP</label>
+          <input type="text" className="w-full p-2.5 border border-slate-200 rounded-lg" value={formData.nip || ''} onChange={e => setFormData({...formData, nip: e.target.value})} />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-slate-700 mb-1">Mata Pelajaran (Pisahkan dengan koma)</label>
+          <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm" rows="3" value={subList} onChange={e => setSubList(e.target.value)}></textarea>
+        </div>
+        <div className="flex justify-end pt-4">
+          <button type="submit" className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl flex items-center gap-2"><Save size={18}/> Simpan Biodata</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ============================================================================
+// STUDENT VIEW DASHBOARD
+// ============================================================================
+function StudentDashboard({ user, studentName, onLogout }) {
+  const [studentInfo, setStudentInfo] = useState(null);
+  const [grades, setGrades] = useState([]);
+  const [subjects, setSubjects] = useState(DEFAULT_SUBJECTS);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    const studentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'students');
+    const unsub = onSnapshot(studentsRef, (snap) => {
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const found = all.find(s => s.name.toLowerCase() === studentName.toLowerCase());
+      setStudentInfo(found || null);
+      if(found) {
+        onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'grades'), (gsnap) => {
+          const sGrades = gsnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(g => g.studentId === found.id);
+          setGrades(sGrades);
+          setLoading(false);
+        });
+      } else {
+        setLoading(false);
+      }
+    });
+    onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'subjects'), (snap) => {
+      if (!snap.empty) setSubjects(snap.docs[0].data().list || DEFAULT_SUBJECTS);
+    });
+    return () => unsub();
+  }, [user, studentName]);
+
+  if (loading) return <div className="p-10 text-center text-blue-600 font-bold">Memuat rapor santri...</div>;
+
+  if (!studentInfo) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
+        <h2 className="text-2xl font-bold text-slate-800 mb-2">Santri Tidak Ditemukan</h2>
+        <p className="text-slate-500 mb-6">Pastikan penulisan nama lengkap sesuai.</p>
+        <button onClick={onLogout} className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold">Kembali</button>
+      </div>
+    );
+  }
+
+  const gMap = {};
+  subjects.forEach(sub => gMap[sub] = { final: 0 });
+  grades.forEach(g => gMap[g.subject] = { ...gMap[g.subject], ...g });
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-6">
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="bg-white rounded-3xl p-6 shadow-sm flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-800">{studentInfo.name}</h1>
+            <p className="text-blue-600 font-bold text-sm">Kelas {studentInfo.className}</p>
+          </div>
+          <button onClick={onLogout} className="px-4 py-2 bg-red-50 text-red-600 font-bold rounded-xl flex items-center gap-2"><LogOut size={16}/> Keluar</button>
+        </div>
+
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+          <h2 className="text-xl font-bold text-slate-800 mb-4">Nilai Raport</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {subjects.map(sub => (
+              <div key={sub} className="bg-slate-50 border border-slate-100 p-4 rounded-xl flex items-center justify-between">
+                <span className="font-semibold text-slate-700">{sub}</span>
+                <span className="text-lg font-extrabold text-blue-600 bg-blue-50 px-3 py-1 rounded-lg">{gMap[sub].final || '-'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
